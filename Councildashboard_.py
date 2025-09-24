@@ -24,7 +24,7 @@ Note: Data for **Decisions** and **People** is loaded from the provided JSON fil
 # --- Define the base directory for the data files ---
 # This path has been updated to point directly to the directory
 # where you unzipped the files.
-BASE_PATH = '/Users/azadehhabibiandehkordi/Heidelberg_Council_JSON'
+BASE_PATH = 'https://github.com/AzadehHa/Data4HD/tree/main'
 
 # --- Data Loading and Preprocessing Functions (using real data) ---
 
