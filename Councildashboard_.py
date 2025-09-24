@@ -8,6 +8,8 @@ import json
 import os
 import folium
 from streamlit_folium import folium_static
+import requests
+from io import StringIO
 
 # --- Configuration and Page Setup ---
 st.set_page_config(
@@ -22,54 +24,59 @@ Note: Data for **Decisions** and **People** is loaded from the provided JSON fil
 """)
 
 # --- Define the base directory for the data files ---
-# This path has been updated to point directly to the directory
-# where you unzipped the files.
-BASE_PATH = 'https://github.com/AzadehHa/Data4HD/tree/main'
+# This path is updated to point to the raw content on GitHub
+BASE_PATH = 'https://raw.githubusercontent.com/AzadehHa/Data4HD/main/'
 
 # --- Data Loading and Preprocessing Functions (using real data) ---
 
 @st.cache_data
 def load_and_preprocess_decisions():
     """
-    Loads and preprocesses council decisions data from provided JSON file.
+    Loads and preprocesses council decisions data from provided JSON file from GitHub.
     """
-    file_path = os.path.join(BASE_PATH, 'tagesordnungspunkte-ratsinformationssystem-stadt-heidelberg-oparl_33f7b659-43f4-4d57-b43b-30ed5d7802d6.json')
+    file_name = 'tagesordnungspunkte-ratsinformationssystem-stadt-heidelberg-oparl_33f7b659-43f4-4d57-b43b-30ed5d7802d6.json'
+    file_url = BASE_PATH + file_name
+    
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        response = requests.get(file_url)
+        response.raise_for_status()  # Raise an HTTPError for bad responses (4xx or 5xx)
+        
+        # Use StringIO to read the response content as a file
+        data = json.load(StringIO(response.text))
         df = pd.DataFrame(data['data'])
         
         # Clean and process data
         df['created'] = pd.to_datetime(df['created']).dt.tz_convert(None)
-        
-        # Extract the decision status from the 'result' field
-        # The 'result' field can sometimes be empty, so handle it gracefully
         df['status'] = df['result'].fillna('No result').str.strip()
-        
-        # Filter out "No result" and "Kenntnis genommen" (taken note of)
         df_filtered = df[~df['status'].isin(['No result', 'Kenntnis genommen'])]
-
+        
         return df, df_filtered
-    except FileNotFoundError:
-        st.error(f"Decisions data file not found at: {file_path}. Please ensure the file is in the correct directory.")
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to fetch decisions data from GitHub: {e}")
+        return pd.DataFrame(), pd.DataFrame()
+    except json.JSONDecodeError as e:
+        st.error(f"Error decoding JSON from decisions data file: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
 @st.cache_data
 def load_and_preprocess_people():
     """
-    Loads and preprocesses council members and their organization data.
+    Loads and preprocesses council members and their organization data from GitHub.
     """
     try:
-        people_path = os.path.join(BASE_PATH, 'personen-ratsinformationssystem-stadt-heidelberg-oparl_f4cff9e2-a2fc-4ba9-a7b0-955e312b72cd.json')
-        org_path = os.path.join(BASE_PATH, 'organisationen-ratsinformationssystem-stadt-heidelberg-oparl_c9b68473-42c7-4992-a574-6618caba978c.json')
-        membership_path = os.path.join(BASE_PATH, 'mitgliedschaften-ratsinformationssystem-stadt-heidelberg-oparl_8c2e8115-15bf-4a03-858a-a4277df36b87.json')
+        people_url = BASE_PATH + 'personen-ratsinformationssystem-stadt-heidelberg-oparl_f4cff9e2-a2fc-4ba9-a7b0-955e312b72cd.json'
+        org_url = BASE_PATH + 'organisationen-ratsinformationssystem-stadt-heidelberg-oparl_c9b68473-42c7-4992-a574-6618caba978c.json'
+        membership_url = BASE_PATH + 'mitgliedschaften-ratsinformationssystem-stadt-heidelberg-oparl_8c2e8115-15bf-4a03-858a-a4277df36b87.json'
 
-        with open(people_path, 'r', encoding='utf-8') as f:
-            people_data = json.load(f)['data']
-        with open(org_path, 'r', encoding='utf-8') as f:
-            org_data = json.load(f)['data']
-        with open(membership_path, 'r', encoding='utf-8') as f:
-            membership_data = json.load(f)['data']
+        # Fetch and load each JSON file
+        def fetch_json(url):
+            response = requests.get(url)
+            response.raise_for_status()
+            return json.load(StringIO(response.text))['data']
+
+        people_data = fetch_json(people_url)
+        org_data = fetch_json(org_url)
+        membership_data = fetch_json(membership_url)
 
         # Create DataFrames
         df_people = pd.DataFrame(people_data)
@@ -95,29 +102,25 @@ def load_and_preprocess_people():
         # Select final columns and rename for display
         df_members_final = df_members[['name_person', 'name_org', 'role', 'startDate']]
         df_members_final.columns = ['Name', 'Organization', 'Role', 'Start Date']
-        
-        # Fill any missing values with a placeholder for a cleaner display
         df_members_final = df_members_final.fillna('Unknown')
-
-        # Clean up organization names, focus on political groups
         df_members_final['Organization'] = df_members_final['Organization'].str.replace('Fraktion der ', '').str.replace('Fraktionsgemeinschaft ', '')
         
         return df_members_final
-    except FileNotFoundError as e:
-        st.error(f"A people/organizations data file was not found. Please ensure all required JSON files are in the correct directory. Error: {e}")
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to fetch people/organizations data from GitHub: {e}")
+        return pd.DataFrame()
+    except json.JSONDecodeError as e:
+        st.error(f"Error decoding JSON from a people/organizations data file: {e}")
         return pd.DataFrame()
 
+# The rest of the code remains the same as it uses simulated data or the new functions above.
 
 # --- Data Simulation Functions (kept for categories without provided data) ---
-
 @st.cache_data
 def load_and_preprocess_budgets():
     st.warning("This data is simulated for demonstration purposes. A real-world application would use actual budget data.")
-    # The fix is here:
-    # Ensure all lists have the same length (20)
     financial_years = pd.to_datetime(np.repeat([f'202{i}-01-01' for i in range(1, 5)], 5))
     departments = ['Administration', 'Public Services', 'Culture & Education', 'Infrastructure', 'Community Projects'] * 4
-    
     data = {
         'financial_year': financial_years,
         'department': departments,
@@ -242,12 +245,11 @@ if category == "Decisions":
         status_counts = filtered_df['status'].value_counts().reset_index()
         status_counts.columns = ['status', 'count']
         
-        # Changed from pie chart to horizontal bar chart
         fig_bar = px.bar(
             status_counts,
             x='count',
             y='status',
-            orientation='h', # The key to making the bars horizontal
+            orientation='h',
             text='count',
             title='Distribution of Decision Statuses',
             labels={'count': 'Number of Decisions', 'status': 'Decision Status'},
@@ -268,7 +270,6 @@ if category == "Decisions":
         
         st.markdown("### Full List of Filtered Decisions")
         st.dataframe(filtered_df[['name', 'status', 'created']].sort_values(by='created', ascending=False), use_container_width=True)
-
 
 elif category == "People":
     df_members = load_and_preprocess_people()
@@ -292,7 +293,6 @@ elif category == "People":
         st.markdown("### Members by Organization")
         org_counts = filtered_df.groupby('Organization')['Name'].nunique().reset_index(name='count')
         
-        # Corrected: Changed from pie chart to horizontal bar chart
         fig_bar = px.bar(
             org_counts.sort_values('count', ascending=False),
             x='count',
@@ -306,7 +306,6 @@ elif category == "People":
 
         st.markdown("### List of Council Members")
         st.dataframe(filtered_df[['Name', 'Organization']].sort_values(by='Organization'), use_container_width=True)
-
 
 elif category == "Budgets":
     df_budgets = load_and_preprocess_budgets()
@@ -371,7 +370,6 @@ elif category == "Budgets":
     st.write(f"The average spending efficiency across the selected period is **{avg_efficiency:.2f}%**.")
     highest_spending_dept = dept_expenditure.loc[dept_expenditure['expenditure'].idxmax()]
     st.write(f"The department with the highest total expenditure is **{highest_spending_dept['department']}**.")
-
 
 elif category == "Projects":
     df_projects = load_and_preprocess_projects()
@@ -540,11 +538,11 @@ elif category == "Demographics":
 st.sidebar.markdown("---")
 st.sidebar.markdown("""
 ### How to Run this App:
-1.  Save the code as `heidelberg_dashboard.py`.
-2.  Ensure you have the required packages installed:
-    `pip install streamlit pandas plotly-express folium`
-3.  Run the app from your terminal:
-    `streamlit run heidelberg_dashboard.py`
+1.  Save the code as `heidelberg_dashboard.py`.
+2.  Ensure you have the required packages installed:
+    `pip install streamlit pandas plotly-express folium requests`
+3.  Run the app from your terminal:
+    `streamlit run heidelberg_dashboard.py`
 """)
 
 # --- Recommendations Section ---
@@ -553,8 +551,8 @@ st.header("Recommendations & Insights")
 st.markdown("""
 This dashboard leverages the provided open data from Heidelberg's city council. Based on this, here are some recommendations for how this data can be further utilized:
 
-1.  **Integrate more data:** Incorporate additional datasets, such as budget or project information, to create a more comprehensive and holistic view of city governance.
-2.  **Granular analysis:** Use the `name` field in the Decisions section to perform text analysis and identify recurring themes and topics of discussion.
-3.  **Real-time updates:** Implement a live connection to the OParl API to ensure the dashboard always shows the latest data.
-4.  **Community Engagement:** Add features for citizens to comment on or interact with specific decisions and documents, fostering greater public participation.
+1.  **Integrate more data:** Incorporate additional datasets, such as budget or project information, to create a more comprehensive and holistic view of city governance.
+2.  **Granular analysis:** Use the `name` field in the Decisions section to perform text analysis and identify recurring themes and topics of discussion.
+3.  **Real-time updates:** Implement a live connection to the OParl API to ensure the dashboard always shows the latest data.
+4.  **Community Engagement:** Add features for citizens to comment on or interact with specific decisions and documents, fostering greater public participation.
 """)
